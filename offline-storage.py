@@ -2,14 +2,6 @@
 
 from gi.repository import Gtk
 
-GPG_HELP_TEXT = """GPG can be used to very safely encrypt the private Bitcoin keys. 
-Several recepients, for whom you have their public encryption key, may be chosen.
-Always choose yourself as a recepient, otherwise you will not be able to decrypt the keys. 
-This gives a 2 level security scheme that is very difficult to break even for governments.
-At the end of the process you will have 2 files to save and an optional password. 
-As long as you don't keep both at the similar locations, you are safe (but don't forget to keep both file very safe!)"""
-
-
 class BTCWindow(Gtk.Window):
     def __init__(self):
         Gtk.Window.__init__(self, title="Bitcoin Offline Storage Tool")
@@ -66,7 +58,90 @@ class BTCWindow(Gtk.Window):
         self.gpg_filename = widget.get_filename()
 
     def get_gpg_keys(self):
-        return None
+        from pyme import core
+        core.check_version(None)
+
+        ret = []
+
+        # Initialize our context.
+        c = core.Context()
+        c.set_armor(1)
+
+        # Set up the recipients.
+        names = self.gpg_emails.get_text().split(",")
+        
+        for name in names:
+            c.op_keylist_start(name, 0)
+            r = c.op_keylist_next()
+            ret.append(r)
+
+        return ret
+
+    def get_user_pw(parent, message, title=''):
+        # Returns user input as a string or None
+        # If user does not input text it returns None, NOT AN EMPTY STRING.
+        
+        dialogWindow = Gtk.MessageDialog(parent,
+                Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                Gtk.MessageType.QUESTION,
+                Gtk.ButtonsType.OK_CANCEL,
+                message)
+        
+        
+        dialogWindow.set_title(title)
+        
+        dialogBox = dialogWindow.get_content_area()
+        userEntry = Gtk.Entry()
+        userEntry.set_visibility(False)
+        userEntry.set_invisible_char("*")
+        userEntry.set_size_request(250,0)
+        dialogBox.pack_end(userEntry, False, False, 0)
+        
+        dialogWindow.show_all()
+        response = dialogWindow.run()
+        text = userEntry.get_text() 
+        dialogWindow.destroy()
+        if (response == Gtk.ResponseType.OK) and (text != ''):
+            return text
+        else:
+            return None
+
+    def progress(*args, **kv):
+        print args, kv
+
+    def generate_gpg_key_pair(self):
+        """
+        Generate a key-pair for the encrypting of the BTC keys
+        """
+        from pyme import core, callbacks
+
+        # Initialize our context.
+        core.check_version(None)
+
+        c = core.Context()
+        c.set_armor(1)
+        c.set_progress_cb(self.progress, None)
+        
+        pass1 = self.get_user_pw("Enter password for the private key", "Key generation")
+        pass2 = self.get_user_pw("Repeat password for private key", "Key generation")
+        if pass1 != pass2:
+            raise Warning("Passwords do not match!")
+
+        parms = """<GnupgKeyParms format="internal">
+        Key-Type: DSA
+        Key-Length: 4096
+        Name-Real: Bitcoin Key Pair
+        Name-Comment: Key for the locking and unlocking of bitcoins
+        Passphrase: %s
+        </GnupgKeyParms>
+        """%pass1
+
+        c.op_genkey(parms, None, None)
+        fpr = c.op_genkey_result().fpr
+        
+        key = c.op_keylist_start(fpr, None)
+        r = c.op_keylist_next()
+        return (r, r)
 
     def do_generate(self):
         keys = self.get_gpg_keys() # Gets all the public keys given in the list.
