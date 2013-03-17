@@ -4,6 +4,13 @@ from gi.repository import Gtk
 
 class BTCWindow(Gtk.Window):
     def __init__(self):
+        from pyme import core
+        
+        core.check_version(None)
+
+        self.c = core.Context()
+        self.c.set_armor(1)
+
         Gtk.Window.__init__(self, title="Bitcoin Offline Storage Tool")
 
         self.btc_filename = None
@@ -59,19 +66,17 @@ class BTCWindow(Gtk.Window):
 
     def get_gpg_keys(self):
         from pyme import core
-        core.check_version(None)
-
+        
+        c = self.c
         ret = []
-
-        # Initialize our context.
-        c = core.Context()
-        c.set_armor(1)
 
         # Set up the recipients.
         names = self.gpg_emails.get_text().split(",")
         
         for name in names:
-            c.op_keylist_start(name, 0)
+            if not name.strip():
+                continue
+            c.op_keylist_start(name.strip(), 0)
             r = c.op_keylist_next()
             ret.append(r)
 
@@ -118,20 +123,30 @@ class BTCWindow(Gtk.Window):
         # Initialize our context.
         core.check_version(None)
 
-        c = core.Context()
-        c.set_armor(1)
+        c = self.c
+
         c.set_progress_cb(self.progress, None)
         
         pass1 = self.get_user_pw("Enter password for the private key", "Key generation")
         pass2 = self.get_user_pw("Repeat password for private key", "Key generation")
         if pass1 != pass2:
             raise Warning("Passwords do not match!")
+        
+        dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.INFO, Gtk.ButtonsType.OK, "Click OK to start generating encryption key-pair.\n"+\
+                "This might take a very long time...")
+        dlg.run()
+        dlg.destroy()
 
         parms = """<GnupgKeyParms format="internal">
         Key-Type: DSA
-        Key-Length: 4096
+        Key-Length: 1024
+        Key-Usage: sign
+        Subkey-Type: ELG-E
+        Subkey-Length: 1024
+        Subkey-Usage: encrypt
         Name-Real: Bitcoin Key Pair
         Name-Comment: Key for the locking and unlocking of bitcoins
+        Name-Email: bitcoin@localhost
         Passphrase: %s
         </GnupgKeyParms>
         """%pass1
@@ -139,12 +154,137 @@ class BTCWindow(Gtk.Window):
         c.op_genkey(parms, None, None)
         fpr = c.op_genkey_result().fpr
         
-        key = c.op_keylist_start(fpr, None)
-        r = c.op_keylist_next()
-        return (r, r)
+        c.op_keylist_start(fpr, 0)
+        key = c.op_keylist_next()
+        enc_key = None
+
+        for subkey in key.subkeys:
+            keyid = subkey.keyid
+            if keyid == None:
+                break
+            can_encrypt = subkey.can_encrypt
+            print "     Subkey %s: encryption %s" % \
+                    (keyid, can_encrypt and "enabled" or "disabled")
+            if can_encrypt:
+                enc_key = c.get_key(keyid, 0)
+        if enc_key is None:
+            print "No encryption key found!"
+
+        return (enc_key, key)
+
+    def generate_new_btc_keys(self):
+        import addrgen
+        num = self.num_of_keys_spinner.get_value()
+        keys = []
+        for i in range(int(num)):
+            keys.append(addrgen.gen_eckey(compressed=False))
+
+        addrs = []
+        for i in keys:
+            addrs.append(addrgen.get_addr(i))
+            print "Added address: %s"%addrs[-1][0]
+
+        return addrs
+
+    def format_sec_message(self, addrs, pub_gpg_keys):
+        """
+        Create a GPG message (encrypted with the given public keys)
+        """
+        from pyme.core import Data
+        from StringIO import StringIO
+
+        c = self.c
+
+        plain = StringIO()
+        plain.write("-- SECRET - This file contains Bitcoin private keys! --\n\n")
+        plain.write("Index,Address,Private Key\n")
+        i = 0
+        for addr, key in addrs:
+            i += 1
+            plain.write("%d,%s,%s\n"%(i,addr,key))
+
+        plain_data = Data(plain.getvalue())
+
+        cipher = Data()
+        c.op_encrypt(pub_gpg_keys, 1, plain_data, cipher)
+        cipher.seek(0,0)
+        return cipher.read()
+
+    def format_pub_message(self, addrs):
+        """
+        Format a public message with a list of addresses without their private keys attached. 
+        """
+        from StringIO import StringIO
+        s = StringIO()
+
+        s.write("List of addresses to be used for save Bitcoin offline storage.\n")
+        s.write("Private keys are encrypted in the message below.\n")
+        s.write("Whoever has this file will be only be able to know how many Bitcoins are in each address.\n")
+        s.write("They will not be able to use the coins unless they have the private key and the password\n")
+
+        i = 0
+        for addr, pk in addrs:
+            i += 1
+            s.write("%d,%s\n"%(i,addr))
+            
+        return s.getvalue()
+
+    def save_btc_file(self, secret_msg, public_msg):
+        """
+        Save BTC message to file
+        """
+        from os.path import isfile
+        
+        if isfile(self.btc_filename):
+            dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.QUESTION, Gtk.ButtonsType.OK_CANCEL, 
+                    "The file %s already exists. Are you sure you want to overwrite it?"%self.btc_filename)
+            res = dlg.run()
+            dlg.destroy()
+            if res != Gtk.ResponseType.OK:
+                raise Warning("Operation cancelled.")
+
+        f = open(self.btc_filename, "w")
+        f.write(public_msg + "\n" + secret_msg)
+        f.close()
+
+    def save_gpg_file(self, priv_gpg):
+        """
+        Save all secret keys - but it's easier to simply copy the whole gpg key-ring. So we'll do that for now.
+        """
+        from os.path import isfile
+        import subprocess
+        
+        if isfile(self.gpg_filename):
+            dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.QUESTION, Gtk.ButtonsType.OK_CANCEL, 
+                    "The file %s already exists. Are you sure you want to overwrite it?"%self.gpg_filename)
+            res = dlg.run()
+            dlg.destroy()
+            if res != Gtk.ResponseType.OK:
+                raise Warning("Operation cancelled.")
+
+        p = subprocess.Popen(["gpg", "-a", "--export-secret-keys"], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
+        
+        out, err = p.communicate()
+        if(p.wait() != 0):
+            raise Warning("GPG backup of secret keys failed!")
+
+        f = open(self.gpg_filename, "w")
+        f.write(out)
+        print out
+        f.close()
+
+
+    def get_private_gpg_keys(self):
+        """
+        Returns the private gpg key used by this user
+        """
+
+        c = self.c
+        return c.op_keylist_all(None, 1)
 
     def do_generate(self):
-        keys = self.get_gpg_keys() # Gets all the public keys given in the list.
+        keys = []
+        keys += self.get_gpg_keys() # Gets all the public keys given in the list.
         if not self.generate_gpg_keys.get_active() and not keys:
             dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, 
                     "No public key can be found! At least one of the following must be given:\n"+\
@@ -154,11 +294,14 @@ class BTCWindow(Gtk.Window):
 
         if self.generate_gpg_keys.get_active():
             generated_pub_gpg, priv_gpg = self.generate_gpg_key_pair()
+            print keys
+            keys.append(generated_pub_gpg)
+            print keys
         else:
-            priv_gpg = self.get_private_gpg_key()  # May have more than one...?
+            priv_gpg = self.get_private_gpg_keys()  # May have more than one...?
         
-        addresses, priv_keys = self.generate_new_btc_keys()
-        secret_msg = self.format_sec_message(priv_keys, addresses, keys)
+        addresses = self.generate_new_btc_keys()
+        secret_msg = self.format_sec_message(addresses, keys)
         public_msg = self.format_pub_message(addresses)
         self.save_btc_file(secret_msg, public_msg)
         self.save_gpg_file(priv_gpg)
