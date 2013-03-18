@@ -2,6 +2,33 @@
 
 from gi.repository import Gtk
 
+class FileChooserEntry(Gtk.HBox):
+    def __init__(self, parent=None, title=None):
+        Gtk.HBox.__init__(self)
+        browse_button = Gtk.Button("Browse...")
+        browse_button.connect("clicked", self.on_browse)
+
+        self.file_entry = Gtk.Entry()
+        self.file_entry.set_sensitive(False)
+
+        self.pack_start(self.file_entry, True, True, 0)
+        self.pack_end(browse_button, False, False, 0)
+
+    def on_browse(self, widget):
+        """
+        Run a file chooser dialog
+        """
+        chooser = Gtk.FileChooserDialog(title="Select Bitcoin Offline File", action=Gtk.FileChooserAction.SAVE,
+                do_overwrite_confirmation=True, buttons=(Gtk.STOCK_CANCEL,Gtk.ResponseType.CANCEL,Gtk.STOCK_OPEN,Gtk.ResponseType.OK))
+        r = chooser.run()
+        if r == Gtk.ResponseType.OK:
+            self.file_entry.set_text(chooser.get_filename())
+        chooser.destroy()
+
+    def get_filename(self):
+        return self.file_entry.get_text()
+    
+
 class BTCWindow(Gtk.Window):
     def __init__(self):
         from pyme import core
@@ -24,14 +51,9 @@ class BTCWindow(Gtk.Window):
         label3 = Gtk.Label(label="GPG Encrypt using public keys for the following email addresses/GPG IDs: ", halign=Gtk.Align.END)
         label4 = Gtk.Label(label="Filename to write GPG keyring to (private keys included): ", halign=Gtk.Align.END)
         label5 = Gtk.Label(label="Check this box to create a new GPG key-pair (unsure? check the box as 'yes'):", halign=Gtk.Align.END)
-
-        file_chooser1 = Gtk.FileChooserButton("Select Bitcoin Offline File", action=Gtk.FileChooserAction.SAVE, 
-                do_overwrite_confirmation=True)
-        file_chooser1.connect("file-set", self.file_selected)
-
-        file_chooser2 = Gtk.FileChooserButton("Filename to write GPG keyring", action=Gtk.FileChooserAction.SAVE, 
-                do_overwrite_confirmation=True)
-        file_chooser2.connect("file-set", self.gpg_file_selected)
+        
+        self.file_chooser_btc = FileChooserEntry()
+        self.file_chooser_gpg = FileChooserEntry()
 
         self.num_of_keys_spinner = Gtk.SpinButton()
         self.num_of_keys_spinner.set_adjustment(Gtk.Adjustment(1.0, 0, 1000.0, 1, 0))
@@ -42,14 +64,14 @@ class BTCWindow(Gtk.Window):
         table = Gtk.Table(8,2,True)
 
         table.attach(label1, 0, 1, 0, 1)
-        table.attach(file_chooser1, 1, 2, 0, 1)
+        table.attach(self.file_chooser_btc, 1, 2, 0, 1)
         table.attach(self.num_of_keys_spinner, 1, 2, 1, 2)
         table.attach(self.button_generate, 1, 2, 7, 8)
         table.attach(label2, 0, 1, 1, 2)
         table.attach(label3, 0, 1, 2, 3)
         table.attach(self.gpg_emails, 1, 2, 2, 3)
         table.attach(label4, 0, 1, 3, 4)
-        table.attach(file_chooser2, 1, 2, 3, 4)
+        table.attach(self.file_chooser_gpg, 1, 2, 3, 4)
         table.attach(label5, 0, 1, 4, 5)
         table.attach(self.generate_gpg_keys, 1, 2, 4, 5)
         box1.add(table)
@@ -57,12 +79,6 @@ class BTCWindow(Gtk.Window):
         
     def on_button_generate_clicked(self, widget):
         self.do_generate()
-
-    def file_selected(self, widget):
-        self.btc_filename = widget.get_filename()
-
-    def gpg_file_selected(self, widget):
-        self.gpg_filename = widget.get_filename()
 
     def get_gpg_keys(self):
         from pyme import core
@@ -234,16 +250,21 @@ class BTCWindow(Gtk.Window):
         Save BTC message to file
         """
         from os.path import isfile
-        
-        if isfile(self.btc_filename):
+
+        fname = self.file_chooser_btc.get_filename()
+
+        if not fname:
+            raise Warning("No file was selected for GPG output")
+
+        if isfile(fname):
             dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.QUESTION, Gtk.ButtonsType.OK_CANCEL, 
-                    "The file %s already exists. Are you sure you want to overwrite it?"%self.btc_filename)
+                    "The file %s already exists. Are you sure you want to overwrite it?"%fname)
             res = dlg.run()
             dlg.destroy()
             if res != Gtk.ResponseType.OK:
                 raise Warning("Operation cancelled.")
 
-        f = open(self.btc_filename, "w")
+        f = open(fname, "w")
         f.write(public_msg + "\n" + secret_msg)
         f.close()
 
@@ -253,22 +274,27 @@ class BTCWindow(Gtk.Window):
         """
         from os.path import isfile
         import subprocess
-        
-        if isfile(self.gpg_filename):
+
+        fname = self.file_chooser_gpg.get_filename()
+
+        if not fname:
+            raise Warning("No file was selected for GPG output")
+
+        if isfile(fname):
             dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.QUESTION, Gtk.ButtonsType.OK_CANCEL, 
-                    "The file %s already exists. Are you sure you want to overwrite it?"%self.gpg_filename)
+                    "The file %s already exists. Are you sure you want to overwrite it?"%fname)
             res = dlg.run()
             dlg.destroy()
             if res != Gtk.ResponseType.OK:
                 raise Warning("Operation cancelled.")
 
-        p = subprocess.Popen(["gpg", "-a", "--export-secret-keys"], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
+        p = subprocess.Popen(["gpg", "-a", "--export-secret-keys"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
         
         out, err = p.communicate()
         if(p.wait() != 0):
-            raise Warning("GPG backup of secret keys failed!")
+            raise Warning("GPG backup of secret keys failed! GPG output was: \n%s\n%s"%(out, err))
 
-        f = open(self.gpg_filename, "w")
+        f = open(fname, "w")
         f.write(out)
         print out
         f.close()
