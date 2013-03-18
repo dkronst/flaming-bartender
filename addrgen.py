@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# Joric/bitcoin-dev, june 2012, public domain
 
 import hashlib
 import ctypes

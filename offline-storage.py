@@ -1,6 +1,14 @@
 #!/usr/bin/env python
 
-from gi.repository import Gtk
+import sys
+try:
+    from gi.repository import Gtk
+    import pyme
+except:
+    print "Unable to import modules - please make sure all modules are installed by running:"
+    print "sudo apt-get install python-pyme gir1.2-gtk-3.0 python-gtk2 python-gobject python-gobject-cairo python-zbarpygtk"
+    sys.exit(1)
+
 
 class FileChooserEntry(Gtk.HBox):
     def __init__(self, parent=None, title=None):
@@ -116,6 +124,7 @@ class BTCWindow(Gtk.Window):
         
         
         dialogWindow.set_title(title)
+        dialogWindow.set_default_response(Gtk.ResponseType.OK)
         
         dialogBox = dialogWindow.get_content_area()
         userEntry = Gtk.Entry()
