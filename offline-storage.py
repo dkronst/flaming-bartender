@@ -131,7 +131,7 @@ class BTCWindow(Gtk.Window):
         if (response == Gtk.ResponseType.OK) and (text != ''):
             return text
         else:
-            return None
+            raise Warning("Operation cancelled")
 
     def progress(*args, **kv):
         print args, kv
@@ -240,7 +240,8 @@ class BTCWindow(Gtk.Window):
         s.write("List of addresses to be used for save Bitcoin offline storage.\n")
         s.write("Private keys are encrypted in the message below.\n")
         s.write("Whoever has this file will be only be able to know how many Bitcoins are in each address.\n")
-        s.write("They will not be able to use the coins unless they have the private key and the password\n")
+        s.write("They will not be able to use the coins unless they have the private key and the password\n\n\n")
+        s.write("Index,Address\n")
 
         i = 0
         for addr, pk in addrs:
@@ -312,29 +313,37 @@ class BTCWindow(Gtk.Window):
         return c.op_keylist_all(None, 1)
 
     def do_generate(self):
-        keys = []
-        keys += self.get_gpg_keys() # Gets all the public keys given in the list.
-        if not self.generate_gpg_keys.get_active() and not keys:
-            dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, 
-                    "No public key can be found! At least one of the following must be given:\n"+\
-                    "1. Generate GPG keys\n2. Specify public keys to for which to encrypt the result")
+        try:
+            if not self.file_chooser_btc.get_filename() or not self.file_chooser_gpg.get_filename():
+                raise Warning("At least on output file is not specified. Make sure you specify both outputs.")
+            keys = []
+            keys += self.get_gpg_keys() # Gets all the public keys given in the list.
+            if not self.generate_gpg_keys.get_active() and not keys:
+                dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, 
+                        "No public key can be found! At least one of the following must be given:\n"+\
+                        "1. Generate GPG keys\n2. Specify public keys to for which to encrypt the result")
+                dlg.run()
+                dlg.destroy()
+
+            if self.generate_gpg_keys.get_active():
+                generated_pub_gpg, priv_gpg = self.generate_gpg_key_pair()
+                keys.append(generated_pub_gpg)
+            else:
+                priv_gpg = self.get_private_gpg_keys()  # May have more than one...?
+            
+            addresses = self.generate_new_btc_keys()
+            secret_msg = self.format_sec_message(addresses, keys)
+            public_msg = self.format_pub_message(addresses)
+            self.save_btc_file(secret_msg, public_msg)
+            self.save_gpg_file(priv_gpg)
+            dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.INFO, Gtk.ButtonsType.OK, "Operation completed successfully")
+            dlg.run()
+            dlg.destroy()
+        except Warning, e:
+            dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, "Error: %s"%e)
             dlg.run()
             dlg.destroy()
 
-        if self.generate_gpg_keys.get_active():
-            generated_pub_gpg, priv_gpg = self.generate_gpg_key_pair()
-            keys.append(generated_pub_gpg)
-        else:
-            priv_gpg = self.get_private_gpg_keys()  # May have more than one...?
-        
-        addresses = self.generate_new_btc_keys()
-        secret_msg = self.format_sec_message(addresses, keys)
-        public_msg = self.format_pub_message(addresses)
-        self.save_btc_file(secret_msg, public_msg)
-        self.save_gpg_file(priv_gpg)
-        dlg = Gtk.MessageDialog(self, 0, Gtk.MessageType.INFO, Gtk.ButtonsType.OK, "Operation completed successfully")
-        dlg.run()
-        dlg.destroy()
 
 def main():
     win = BTCWindow()
