@@ -4,6 +4,10 @@ from gi.repository import Gtk
 
 class FileChooserEntry(Gtk.HBox):
     def __init__(self, parent=None, title=None):
+        if parent:
+            self.parent = parent
+        self.title = title
+
         Gtk.HBox.__init__(self)
         browse_button = Gtk.Button("Browse...")
         browse_button.connect("clicked", self.on_browse)
@@ -18,9 +22,11 @@ class FileChooserEntry(Gtk.HBox):
         """
         Run a file chooser dialog
         """
-        chooser = Gtk.FileChooserDialog(title="Select Bitcoin Offline File", action=Gtk.FileChooserAction.SAVE,
+        title = self.title or None
+        chooser = Gtk.FileChooserDialog(title=title, action=Gtk.FileChooserAction.SAVE,
                 do_overwrite_confirmation=True, buttons=(Gtk.STOCK_CANCEL,Gtk.ResponseType.CANCEL,Gtk.STOCK_OPEN,Gtk.ResponseType.OK))
         r = chooser.run()
+
         if r == Gtk.ResponseType.OK:
             self.file_entry.set_text(chooser.get_filename())
         chooser.destroy()
@@ -52,8 +58,8 @@ class BTCWindow(Gtk.Window):
         label4 = Gtk.Label(label="Filename to write GPG keyring to (private keys included): ", halign=Gtk.Align.END)
         label5 = Gtk.Label(label="Check this box to create a new GPG key-pair (unsure? check the box as 'yes'):", halign=Gtk.Align.END)
         
-        self.file_chooser_btc = FileChooserEntry()
-        self.file_chooser_gpg = FileChooserEntry()
+        self.file_chooser_btc = FileChooserEntry(self, title="Choose a file to save encrypted bitcoin addresses")
+        self.file_chooser_gpg = FileChooserEntry(self, title="Choose a file to save GPG key files")
 
         self.num_of_keys_spinner = Gtk.SpinButton()
         self.num_of_keys_spinner.set_adjustment(Gtk.Adjustment(1.0, 0, 1000.0, 1, 0))
@@ -179,8 +185,6 @@ class BTCWindow(Gtk.Window):
             if keyid == None:
                 break
             can_encrypt = subkey.can_encrypt
-            print "     Subkey %s: encryption %s" % \
-                    (keyid, can_encrypt and "enabled" or "disabled")
             if can_encrypt:
                 enc_key = c.get_key(keyid, 0)
         if enc_key is None:
@@ -296,7 +300,6 @@ class BTCWindow(Gtk.Window):
 
         f = open(fname, "w")
         f.write(out)
-        print out
         f.close()
 
 
@@ -320,9 +323,7 @@ class BTCWindow(Gtk.Window):
 
         if self.generate_gpg_keys.get_active():
             generated_pub_gpg, priv_gpg = self.generate_gpg_key_pair()
-            print keys
             keys.append(generated_pub_gpg)
-            print keys
         else:
             priv_gpg = self.get_private_gpg_keys()  # May have more than one...?
         
